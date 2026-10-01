@@ -31,6 +31,10 @@
 
   <div class="grid">
     <div class="card">
+      <label for="athleteName">Nome do atleta</label>
+      <input id="athleteName" type="text" maxlength="80" placeholder="Ex.: Tiago">
+    </div>
+    <div class="card">
       <label for="distance">Distância entre Linha A e Linha B (metros)</label>
       <input id="distance" type="number" min="0.5" max="200" step="0.1" value="10">
     </div>
@@ -76,6 +80,10 @@
           <div style="font-weight:800">Histórico de testes</div>
           <div class="note">Os resultados ficam salvos neste aparelho.</div>
         </div>
+        <div style="min-width:220px;flex:1;max-width:320px">
+          <label for="athleteFilter">Filtrar atleta</label>
+          <input id="athleteFilter" type="text" placeholder="Digite o nome">
+        </div>
         <div class="actions">
           <button id="exportBtn" class="secondary" type="button">EXPORTAR CSV</button>
           <button id="clearHistoryBtn" class="danger" type="button">LIMPAR HISTÓRICO</button>
@@ -85,7 +93,7 @@
         <table style="width:100%;border-collapse:collapse;min-width:760px">
           <thead>
             <tr style="text-align:left;color:var(--muted);font-size:12px">
-              <th style="padding:8px;border-bottom:1px solid var(--line)">Data</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">Atleta</th><th style="padding:8px;border-bottom:1px solid var(--line)">Data</th>
               <th style="padding:8px;border-bottom:1px solid var(--line)">Distância</th>
               <th style="padding:8px;border-bottom:1px solid var(--line)">Sentido</th>
               <th style="padding:8px;border-bottom:1px solid var(--line)">Tempo</th>
@@ -121,12 +129,12 @@ import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@m
 const $ = (s)=>document.querySelector(s);
 const video=$('#video'), canvas=$('#overlay'), ctx=canvas.getContext('2d');
 const cameraBtn=$('#cameraBtn'), stopBtn=$('#stopBtn'), armBtn=$('#armBtn'), resetBtn=$('#resetBtn');
-const distanceInput=$('#distance'), facing=$('#facing');
+const distanceInput=$('#distance'), athleteNameInput=$('#athleteName'), facing=$('#facing');
 const modelDot=$('#modelDot'), camDot=$('#camDot'), athDot=$('#athDot'), hipDot=$('#hipDot');
 const modelState=$('#modelState'), camState=$('#camState'), athState=$('#athState'), hipState=$('#hipState');
 const aState=$('#aState'), bState=$('#bState'), runState=$('#runState'), fpsOut=$('#fpsOut'), message=$('#message');
 const timeOut=$('#timeOut'), kmhOut=$('#kmhOut'), msOut=$('#msOut');
-const historyBody=$('#historyBody'), exportBtn=$('#exportBtn'), clearHistoryBtn=$('#clearHistoryBtn');
+const historyBody=$('#historyBody'), exportBtn=$('#exportBtn'), clearHistoryBtn=$('#clearHistoryBtn'), athleteFilter=$('#athleteFilter');
 const HISTORY_KEY='speedvision_history_v1';
 let currentFpsValue=null;
 const hudArmBtn=$('#hudArmBtn'), hudResetBtn=$('#hudResetBtn'), hudDistance=$('#hudDistance'), hudState=$('#hudState'), hudTime=$('#hudTime'), hudKmh=$('#hudKmh');
@@ -143,15 +151,18 @@ function saveHistory(items){
   localStorage.setItem(HISTORY_KEY,JSON.stringify(items));
 }
 function renderHistory(){
-  const items=loadHistory();
+  let items=loadHistory();
+  const filter=(athleteFilter?.value||'').trim().toLowerCase();
+  if(filter) items=items.filter(i=>(i.athlete||'Sem nome').toLowerCase().includes(filter));
   historyBody.innerHTML='';
   if(!items.length){
-    historyBody.innerHTML='<tr><td colspan="7" style="padding:14px 8px;color:var(--muted)">Nenhum teste salvo ainda.</td></tr>';
+    historyBody.innerHTML='<tr><td colspan="8" style="padding:14px 8px;color:var(--muted)">Nenhum teste salvo ainda.</td></tr>';
     return;
   }
   items.slice().reverse().forEach(item=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`
+      <td style="padding:8px;border-bottom:1px solid var(--line)"><b>${item.athlete||'Sem nome'}</b></td>
       <td style="padding:8px;border-bottom:1px solid var(--line)">${item.dateLabel}</td>
       <td style="padding:8px;border-bottom:1px solid var(--line)">${item.distance.toFixed(1).replace('.',',')} m</td>
       <td style="padding:8px;border-bottom:1px solid var(--line)">${item.direction}</td>
@@ -162,13 +173,14 @@ function renderHistory(){
     historyBody.appendChild(tr);
   });
 }
-function storeTest({distance,direction,time,ms,kmh}){
+function storeTest({athlete,distance,direction,time,ms,kmh}){
   const items=loadHistory();
   const now=new Date();
   items.push({
     id: now.getTime(),
     iso: now.toISOString(),
     dateLabel: now.toLocaleString('pt-BR'),
+    athlete: athlete || 'Sem nome',
     distance,
     direction,
     time,
@@ -182,8 +194,8 @@ function storeTest({distance,direction,time,ms,kmh}){
 function exportHistory(){
   const items=loadHistory();
   if(!items.length){message.textContent='Não há testes para exportar.';return}
-  const rows=[['data','distancia_m','sentido','tempo_s','velocidade_ms','velocidade_kmh','fps']];
-  items.forEach(i=>rows.push([i.iso,i.distance,i.direction,i.time,i.ms,i.kmh,i.fps??'']));
+  const rows=[['atleta','data','distancia_m','sentido','tempo_s','velocidade_ms','velocidade_kmh','fps']];
+  items.forEach(i=>rows.push([i.athlete||'Sem nome',i.iso,i.distance,i.direction,i.time,i.ms,i.kmh,i.fps??'']));
   const csv=rows.map(r=>r.join(';')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
@@ -392,7 +404,7 @@ function drawAndMeasure(result,ts){
           kmhOut.textContent=kmhTxt;
           hudTime.textContent=secTxt;
           hudKmh.textContent=kmhTxt;
-          storeTest({distance:dist,direction:startLine+' → '+finishLine,time:sec,ms,kmh});message.textContent='Teste concluído e salvo: '+startLine+' → '+finishLine+'.';
+          storeTest({athlete:(athleteNameInput.value||'').trim(),distance:dist,direction:startLine+' → '+finishLine,time:sec,ms,kmh});message.textContent='Teste concluído e salvo: '+startLine+' → '+finishLine+'.';
         }
       }
     }
