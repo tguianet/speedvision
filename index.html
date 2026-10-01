@@ -18,6 +18,8 @@
     .status{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-size:14px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#667085;margin-right:6px}.dot.on{background:var(--ok)}
     .note{font-size:12px;color:var(--muted)} .warn{color:#ffd28a}.result{font-weight:700}.full{grid-column:1/-1}
     @media(max-width:700px){.grid{grid-template-columns:1fr;gap:0;margin:0}.stats{grid-template-columns:1fr}.status{grid-template-columns:1fr}.wrap{padding:0}.v{font-size:21px}.camera{height:100vh;min-height:100vh}.top,.grid>.card:not(.camera){margin-left:10px;margin-right:10px}.top{padding-top:10px}}
+@media (orientation:landscape) and (max-height:700px){body.landscape-test{overflow:hidden}body.landscape-test .top,body.landscape-test .grid>.card:not(.camera){display:none!important}body.landscape-test .grid{display:block;margin:0}body.landscape-test .camera{display:block;position:fixed;inset:0;width:100vw;height:100vh;min-height:0;z-index:1000;border:0;border-radius:0;margin:0}body.landscape-test video,body.landscape-test canvas{width:100%;height:100%;object-fit:cover}body.landscape-test #raceHud{display:flex}body.landscape-test .hudResult{display:flex}}
+#raceHud{display:none;position:fixed;inset:0;z-index:1100;pointer-events:none;padding:10px;align-items:flex-start;justify-content:space-between;gap:10px}.hudGroup{display:flex;gap:8px;flex-wrap:wrap;pointer-events:auto}.hudPill{background:rgba(0,0,0,.62);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.18);color:#fff;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700}.hudBtn{border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.68);color:#fff;border-radius:12px;padding:10px 12px;font-weight:800;min-height:42px}.hudBtn.arm{background:rgba(20,83,45,.88);color:#d1fae5}.hudResult{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:1101;display:none;gap:14px;background:rgba(0,0,0,.68);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:10px 14px;pointer-events:none}.hudResult b{font-size:18px}
   </style>
 </head>
 <body>
@@ -41,6 +43,18 @@
       <video id="video" playsinline muted></video>
       <canvas id="overlay"></canvas>
     </div>
+
+    <div id="raceHud">
+      <div class="hudGroup">
+        <div class="hudPill">DISTÂNCIA: <span id="hudDistance">10</span> m</div>
+        <div class="hudPill">ESTADO: <span id="hudState">aguardando</span></div>
+      </div>
+      <div class="hudGroup">
+        <button id="hudArmBtn" class="hudBtn arm" type="button">ARMAR TESTE</button>
+        <button id="hudResetBtn" class="hudBtn" type="button">ZERAR</button>
+      </div>
+    </div>
+    <div class="hudResult"><span>Tempo <b id="hudTime">—</b></span><span>Velocidade <b id="hudKmh">—</b></span></div>
 
     <div class="card full">
       <div class="actions">
@@ -83,6 +97,7 @@ const modelDot=$('#modelDot'), camDot=$('#camDot'), athDot=$('#athDot'), hipDot=
 const modelState=$('#modelState'), camState=$('#camState'), athState=$('#athState'), hipState=$('#hipState');
 const aState=$('#aState'), bState=$('#bState'), runState=$('#runState'), fpsOut=$('#fpsOut'), message=$('#message');
 const timeOut=$('#timeOut'), kmhOut=$('#kmhOut'), msOut=$('#msOut');
+const hudArmBtn=$('#hudArmBtn'), hudResetBtn=$('#hudResetBtn'), hudDistance=$('#hudDistance'), hudState=$('#hudState'), hudTime=$('#hudTime'), hudKmh=$('#hudKmh');
 
 let pose=null, stream=null, frameHandle=null, running=false, armed=false;
 let lineA=.20, lineB=.80, dragging=null;
@@ -90,7 +105,7 @@ let prevHipX=null, t1=null, t2=null, lastTimestamp=-1, lastFpsT=performance.now(
 let smoothHipX=null;
 
 function setDot(el,on){el.classList.toggle('on',!!on)}
-function resetMeasurement(){armed=false; t1=t2=null; prevHipX=null; smoothHipX=null; aState.textContent='aguardando'; bState.textContent='aguardando'; runState.textContent='não armado'; timeOut.textContent=kmhOut.textContent=msOut.textContent='—'; if(stream) armBtn.textContent='ARMAR TESTE'}
+function resetMeasurement(){armed=false; t1=t2=null; prevHipX=null; smoothHipX=null; aState.textContent='aguardando'; bState.textContent='aguardando'; runState.textContent='não armado'; timeOut.textContent=kmhOut.textContent=msOut.textContent='—'; hudTime.textContent='—'; hudKmh.textContent='—'; hudState.textContent='aguardando'; if(stream) armBtn.textContent='ARMAR TESTE'; hudArmBtn.textContent='ARMAR TESTE'}
 resetBtn.addEventListener('click',resetMeasurement);
 
 async function loadPose(){
@@ -126,10 +141,14 @@ async function requestCameraOnOpen(){
 }
 
 cameraBtn.addEventListener('click',startCamera); stopBtn.addEventListener('click',stopCamera);
-armBtn.addEventListener('click',()=>{
+function armRaceTest(){
   if(!pose||!stream)return;
-  resetMeasurement(); armed=true; armBtn.textContent='TESTE ARMADO'; runState.textContent='aguardando Linha A'; message.textContent='Corra da Linha A para a Linha B.';
-});
+  resetMeasurement(); armed=true; armBtn.textContent='TESTE ARMADO'; hudArmBtn.textContent='TESTE ARMADO'; runState.textContent='aguardando Linha A'; hudState.textContent='aguardando Linha A'; message.textContent='Corra da Linha A para a Linha B.';
+}
+armBtn.addEventListener('click',armRaceTest);
+hudArmBtn.addEventListener('click',armRaceTest);
+hudResetBtn.addEventListener('click',resetMeasurement);
+distanceInput.addEventListener('input',()=>{hudDistance.textContent=distanceInput.value||'0'});
 
 async function startCamera(){
   try{
@@ -240,11 +259,11 @@ function drawAndMeasure(result,ts){
   if(armed){
     const dir=lineB>lineA?1:-1;
     if(t1==null && crossed(prevHipX,x,lineA,dir)){
-      t1=ts;aState.textContent='detectada';runState.textContent='correndo → Linha B';
+      t1=ts;aState.textContent='detectada';runState.textContent='correndo → Linha B';hudState.textContent='correndo → Linha B';
     } else if(t1!=null && t2==null && crossed(prevHipX,x,lineB,dir)){
-      t2=ts;bState.textContent='detectada';armed=false;armBtn.textContent='ARMAR NOVO TESTE';runState.textContent='concluído';
+      t2=ts;bState.textContent='detectada';armed=false;armBtn.textContent='ARMAR NOVO TESTE';hudArmBtn.textContent='ARMAR NOVO TESTE';runState.textContent='concluído';hudState.textContent='concluído';
       const sec=(t2-t1)/1000, dist=parseFloat(distanceInput.value);
-      if(sec>0 && dist>0){const ms=dist/sec,kmh=ms*3.6;timeOut.textContent=sec.toFixed(3).replace('.',',')+' s';msOut.textContent=ms.toFixed(2).replace('.',',')+' m/s';kmhOut.textContent=kmh.toFixed(2).replace('.',',')+' km/h';message.textContent='Teste concluído.'}
+      if(sec>0 && dist>0){const ms=dist/sec,kmh=ms*3.6;const secTxt=sec.toFixed(3).replace('.',',')+' s', kmhTxt=kmh.toFixed(2).replace('.',',')+' km/h';timeOut.textContent=secTxt;msOut.textContent=ms.toFixed(2).replace('.',',')+' m/s';kmhOut.textContent=kmhTxt;hudTime.textContent=secTxt;hudKmh.textContent=kmhTxt;message.textContent='Teste concluído.'}
     }
   }
   prevHipX=x;
@@ -260,6 +279,14 @@ canvas.addEventListener('pointerdown',e=>{const x=pointerX(e);const da=Math.abs(
 canvas.addEventListener('pointermove',e=>{if(!dragging)return;const x=pointerX(e);if(dragging==='A')lineA=x;else lineB=x});
 canvas.addEventListener('pointerup',()=>dragging=null);canvas.addEventListener('pointercancel',()=>dragging=null);
 
+function syncOrientationMode(){
+  const landscape=window.matchMedia('(orientation: landscape)').matches;
+  document.body.classList.toggle('landscape-test',landscape);
+  if(landscape && stream){hudState.textContent=armed?'teste armado':'aguardando';}
+}
+window.addEventListener('orientationchange',()=>setTimeout(syncOrientationMode,120));
+window.addEventListener('resize',syncOrientationMode);
+syncOrientationMode();
 window.addEventListener('beforeunload',stopCamera);
 
 // Solicita a câmera automaticamente ao abrir o sistema.
