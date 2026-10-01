@@ -70,6 +70,35 @@
       <div class="stat"><div class="k">METROS/SEGUNDO</div><div id="msOut" class="v">—</div></div>
     </div>
 
+    <div class="card full" id="historyCard">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div>
+          <div style="font-weight:800">Histórico de testes</div>
+          <div class="note">Os resultados ficam salvos neste aparelho.</div>
+        </div>
+        <div class="actions">
+          <button id="exportBtn" class="secondary" type="button">EXPORTAR CSV</button>
+          <button id="clearHistoryBtn" class="danger" type="button">LIMPAR HISTÓRICO</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:760px">
+          <thead>
+            <tr style="text-align:left;color:var(--muted);font-size:12px">
+              <th style="padding:8px;border-bottom:1px solid var(--line)">Data</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">Distância</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">Sentido</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">Tempo</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">m/s</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">km/h</th>
+              <th style="padding:8px;border-bottom:1px solid var(--line)">FPS</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="card full">
       <div class="status">
         <div><span id="modelDot" class="dot"></span>Modelo: <b id="modelState">carregando...</b></div>
@@ -97,12 +126,78 @@ const modelDot=$('#modelDot'), camDot=$('#camDot'), athDot=$('#athDot'), hipDot=
 const modelState=$('#modelState'), camState=$('#camState'), athState=$('#athState'), hipState=$('#hipState');
 const aState=$('#aState'), bState=$('#bState'), runState=$('#runState'), fpsOut=$('#fpsOut'), message=$('#message');
 const timeOut=$('#timeOut'), kmhOut=$('#kmhOut'), msOut=$('#msOut');
+const historyBody=$('#historyBody'), exportBtn=$('#exportBtn'), clearHistoryBtn=$('#clearHistoryBtn');
+const HISTORY_KEY='speedvision_history_v1';
+let currentFpsValue=null;
 const hudArmBtn=$('#hudArmBtn'), hudResetBtn=$('#hudResetBtn'), hudDistance=$('#hudDistance'), hudState=$('#hudState'), hudTime=$('#hudTime'), hudKmh=$('#hudKmh');
 
 let pose=null, stream=null, frameHandle=null, running=false, armed=false;
 let lineA=.20, lineB=.80, dragging=null;
 let prevHipX=null, t1=null, t2=null, lastTimestamp=-1, lastFpsT=performance.now(), frames=0;
 let smoothHipX=null, startLine=null, finishLine=null;
+
+function loadHistory(){
+  try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]')}catch{return []}
+}
+function saveHistory(items){
+  localStorage.setItem(HISTORY_KEY,JSON.stringify(items));
+}
+function renderHistory(){
+  const items=loadHistory();
+  historyBody.innerHTML='';
+  if(!items.length){
+    historyBody.innerHTML='<tr><td colspan="7" style="padding:14px 8px;color:var(--muted)">Nenhum teste salvo ainda.</td></tr>';
+    return;
+  }
+  items.slice().reverse().forEach(item=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.dateLabel}</td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.distance.toFixed(1).replace('.',',')} m</td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.direction}</td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.time.toFixed(3).replace('.',',')} s</td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.ms.toFixed(2).replace('.',',')}</td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)"><b>${item.kmh.toFixed(2).replace('.',',')}</b></td>
+      <td style="padding:8px;border-bottom:1px solid var(--line)">${item.fps ?? '—'}</td>`;
+    historyBody.appendChild(tr);
+  });
+}
+function storeTest({distance,direction,time,ms,kmh}){
+  const items=loadHistory();
+  const now=new Date();
+  items.push({
+    id: now.getTime(),
+    iso: now.toISOString(),
+    dateLabel: now.toLocaleString('pt-BR'),
+    distance,
+    direction,
+    time,
+    ms,
+    kmh,
+    fps: currentFpsValue
+  });
+  saveHistory(items.slice(-500));
+  renderHistory();
+}
+function exportHistory(){
+  const items=loadHistory();
+  if(!items.length){message.textContent='Não há testes para exportar.';return}
+  const rows=[['data','distancia_m','sentido','tempo_s','velocidade_ms','velocidade_kmh','fps']];
+  items.forEach(i=>rows.push([i.iso,i.distance,i.direction,i.time,i.ms,i.kmh,i.fps??'']));
+  const csv=rows.map(r=>r.join(';')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='speedvision-testes.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+exportBtn.addEventListener('click',exportHistory);
+clearHistoryBtn.addEventListener('click',()=>{
+  if(confirm('Apagar todo o histórico de testes deste aparelho?')){
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+  }
+});
+renderHistory();
 
 function setDot(el,on){el.classList.toggle('on',!!on)}
 function resetMeasurement(){armed=false; t1=t2=null; prevHipX=null; smoothHipX=null; startLine=null; finishLine=null; aState.textContent='aguardando'; bState.textContent='aguardando'; runState.textContent='não armado'; timeOut.textContent=kmhOut.textContent=msOut.textContent='—'; hudTime.textContent='—'; hudKmh.textContent='—'; hudState.textContent='aguardando'; if(stream) armBtn.textContent='ARMAR TESTE'; hudArmBtn.textContent='ARMAR TESTE'}
@@ -225,7 +320,7 @@ function processFrame(now,meta){
     try{result=pose.detectForVideo(video,ts)}catch(e){console.error(e)}
   }
   drawAndMeasure(result,ts);
-  frames++;const n=performance.now(); if(n-lastFpsT>=1000){fpsOut.textContent=(frames*1000/(n-lastFpsT)).toFixed(1);frames=0;lastFpsT=n}
+  frames++;const n=performance.now(); if(n-lastFpsT>=1000){currentFpsValue=Number((frames*1000/(n-lastFpsT)).toFixed(1));fpsOut.textContent=currentFpsValue.toFixed(1);frames=0;lastFpsT=n}
   scheduleFrame();
 }
 
@@ -297,7 +392,7 @@ function drawAndMeasure(result,ts){
           kmhOut.textContent=kmhTxt;
           hudTime.textContent=secTxt;
           hudKmh.textContent=kmhTxt;
-          message.textContent='Teste concluído: '+startLine+' → '+finishLine+'.';
+          storeTest({distance:dist,direction:startLine+' → '+finishLine,time:sec,ms,kmh});message.textContent='Teste concluído e salvo: '+startLine+' → '+finishLine+'.';
         }
       }
     }
