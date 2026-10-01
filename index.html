@@ -102,10 +102,10 @@ const hudArmBtn=$('#hudArmBtn'), hudResetBtn=$('#hudResetBtn'), hudDistance=$('#
 let pose=null, stream=null, frameHandle=null, running=false, armed=false;
 let lineA=.20, lineB=.80, dragging=null;
 let prevHipX=null, t1=null, t2=null, lastTimestamp=-1, lastFpsT=performance.now(), frames=0;
-let smoothHipX=null;
+let smoothHipX=null, startLine=null, finishLine=null;
 
 function setDot(el,on){el.classList.toggle('on',!!on)}
-function resetMeasurement(){armed=false; t1=t2=null; prevHipX=null; smoothHipX=null; aState.textContent='aguardando'; bState.textContent='aguardando'; runState.textContent='não armado'; timeOut.textContent=kmhOut.textContent=msOut.textContent='—'; hudTime.textContent='—'; hudKmh.textContent='—'; hudState.textContent='aguardando'; if(stream) armBtn.textContent='ARMAR TESTE'; hudArmBtn.textContent='ARMAR TESTE'}
+function resetMeasurement(){armed=false; t1=t2=null; prevHipX=null; smoothHipX=null; startLine=null; finishLine=null; aState.textContent='aguardando'; bState.textContent='aguardando'; runState.textContent='não armado'; timeOut.textContent=kmhOut.textContent=msOut.textContent='—'; hudTime.textContent='—'; hudKmh.textContent='—'; hudState.textContent='aguardando'; if(stream) armBtn.textContent='ARMAR TESTE'; hudArmBtn.textContent='ARMAR TESTE'}
 resetBtn.addEventListener('click',resetMeasurement);
 
 async function loadPose(){
@@ -143,7 +143,7 @@ async function requestCameraOnOpen(){
 cameraBtn.addEventListener('click',startCamera); stopBtn.addEventListener('click',stopCamera);
 function armRaceTest(){
   if(!pose||!stream)return;
-  resetMeasurement(); armed=true; armBtn.textContent='TESTE ARMADO'; hudArmBtn.textContent='TESTE ARMADO'; runState.textContent='aguardando Linha A'; hudState.textContent='aguardando Linha A'; message.textContent='Corra da Linha A para a Linha B.';
+  resetMeasurement(); armed=true; armBtn.textContent='TESTE ARMADO'; hudArmBtn.textContent='TESTE ARMADO'; runState.textContent='aguardando A ou B'; hudState.textContent='aguardando A ou B'; message.textContent='Teste armado. Pode correr em qualquer sentido: A → B ou B → A.';
 }
 armBtn.addEventListener('click',armRaceTest);
 hudArmBtn.addEventListener('click',armRaceTest);
@@ -244,9 +244,9 @@ function bodyAnchor(landmarks){
          pointPairCenter(landmarks,25,26,.15) ||
          pointPairCenter(landmarks,27,28,.15);
 }
-function crossed(prev,curr,line,direction){
+function crossedAnyDirection(prev,curr,line){
   if(prev==null || curr==null) return false;
-  return direction>0 ? (prev < line && curr >= line) : (prev > line && curr <= line);
+  return (prev < line && curr >= line) || (prev > line && curr <= line);
 }
 
 function drawAndMeasure(result,ts){
@@ -263,13 +263,43 @@ function drawAndMeasure(result,ts){
   ctx.beginPath();ctx.arc(x*canvas.width,y*canvas.height,12,0,Math.PI*2);ctx.fillStyle='#34d399';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#07110e';ctx.stroke();ctx.font=`700 ${Math.max(15,canvas.width/55)}px system-ui`;ctx.fillStyle='#34d399';ctx.fillText('ATLETA',Math.min(x*canvas.width+16,canvas.width-90),Math.max(24,y*canvas.height-14));
 
   if(armed){
-    const dir=lineB>lineA?1:-1;
-    if(t1==null && crossed(prevHipX,x,lineA,dir)){
-      t1=ts;aState.textContent='detectada';runState.textContent='correndo → Linha B';hudState.textContent='correndo → Linha B';
-    } else if(t1!=null && t2==null && crossed(prevHipX,x,lineB,dir)){
-      t2=ts;bState.textContent='detectada';armed=false;armBtn.textContent='ARMAR NOVO TESTE';hudArmBtn.textContent='ARMAR NOVO TESTE';runState.textContent='concluído';hudState.textContent='concluído';
-      const sec=(t2-t1)/1000, dist=parseFloat(distanceInput.value);
-      if(sec>0 && dist>0){const ms=dist/sec,kmh=ms*3.6;const secTxt=sec.toFixed(3).replace('.',',')+' s', kmhTxt=kmh.toFixed(2).replace('.',',')+' km/h';timeOut.textContent=secTxt;msOut.textContent=ms.toFixed(2).replace('.',',')+' m/s';kmhOut.textContent=kmhTxt;hudTime.textContent=secTxt;hudKmh.textContent=kmhTxt;message.textContent='Teste concluído.'}
+    const crossA=crossedAnyDirection(prevHipX,x,lineA);
+    const crossB=crossedAnyDirection(prevHipX,x,lineB);
+
+    if(t1==null){
+      if(crossA){
+        t1=ts; startLine='A'; finishLine='B';
+        aState.textContent='início';
+        runState.textContent='correndo → Linha B';
+        hudState.textContent='A → B';
+      } else if(crossB){
+        t1=ts; startLine='B'; finishLine='A';
+        bState.textContent='início';
+        runState.textContent='correndo → Linha A';
+        hudState.textContent='B → A';
+      }
+    } else if(t2==null){
+      const finished=(finishLine==='A' && crossA) || (finishLine==='B' && crossB);
+      if(finished){
+        t2=ts;
+        if(finishLine==='A') aState.textContent='fim'; else bState.textContent='fim';
+        armed=false;
+        armBtn.textContent='ARMAR NOVO TESTE';
+        hudArmBtn.textContent='ARMAR NOVO TESTE';
+        runState.textContent='concluído '+startLine+' → '+finishLine;
+        hudState.textContent='concluído '+startLine+' → '+finishLine;
+        const sec=(t2-t1)/1000, dist=parseFloat(distanceInput.value);
+        if(sec>0 && dist>0){
+          const ms=dist/sec,kmh=ms*3.6;
+          const secTxt=sec.toFixed(3).replace('.',',')+' s', kmhTxt=kmh.toFixed(2).replace('.',',')+' km/h';
+          timeOut.textContent=secTxt;
+          msOut.textContent=ms.toFixed(2).replace('.',',')+' m/s';
+          kmhOut.textContent=kmhTxt;
+          hudTime.textContent=secTxt;
+          hudKmh.textContent=kmhTxt;
+          message.textContent='Teste concluído: '+startLine+' → '+finishLine+'.';
+        }
+      }
     }
   }
   prevHipX=x;
