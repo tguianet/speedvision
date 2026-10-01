@@ -6,7 +6,7 @@
   <title>SpeedVision V1.4</title>
   <style>
     :root{color-scheme:dark;--bg:#0b0d10;--card:#15191f;--muted:#9aa4b2;--line:#2c3440;--accent:#ffcc00;--ok:#34d399;--bad:#fb7185;--text:#f4f7fb}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    *{box-sizing:border-box} html,body{width:100%;max-width:100%;overflow-x:hidden} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
     .wrap{width:100%;max-width:none;margin:0;padding:0}.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
     h1{font-size:22px;margin:0}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
     .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}.camera{padding:0;overflow:hidden;position:relative;background:#000;width:100%;aspect-ratio:16/9;min-height:0;border-radius:16px}
@@ -489,10 +489,10 @@ window.addEventListener('beforeunload',stopCamera);
 setTimeout(requestCameraOnOpen, 250);
 </script>
 
-<div id="cameraPermissionModal" style="position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;">
-  <div style="width:min(420px,100%);background:#111827;color:#fff;border-radius:18px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.45);font-family:Arial,sans-serif;">
-    <div style="font-size:22px;font-weight:700;margin-bottom:10px;">Permitir acesso à câmera</div>
-    <div style="font-size:15px;line-height:1.5;color:#d1d5db;margin-bottom:18px;">O SpeedVision precisa usar a câmera para detectar o atleta e medir o tempo entre as linhas. Toque no botão abaixo e depois escolha <b>Permitir</b> quando o navegador solicitar.</div>
+<div id="cameraPermissionModal" style="position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:99999;padding:12px;overflow:hidden;">
+  <div style="width:100%;max-width:420px;min-width:0;box-sizing:border-box;background:#111827;color:#fff;border-radius:18px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.45);font-family:Arial,sans-serif;overflow:hidden;">
+    <div style="font-size:22px;font-weight:700;margin-bottom:10px;overflow-wrap:anywhere;">Permitir acesso à câmera</div>
+    <div style="font-size:15px;line-height:1.5;color:#d1d5db;margin-bottom:18px;overflow-wrap:anywhere;">O SpeedVision precisa usar a câmera para detectar o atleta e medir o tempo entre as linhas. Toque no botão abaixo e depois escolha <b>Permitir</b> quando o navegador solicitar.</div>
     <button id="grantCameraPermission" style="width:100%;min-height:52px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">ATIVAR CÂMERA</button>
     <button id="closeCameraPermission" style="width:100%;min-height:44px;margin-top:10px;border:1px solid #374151;border-radius:12px;background:transparent;color:#d1d5db;font-size:14px;cursor:pointer;">Agora não</button>
     <div id="cameraPermissionHint" style="margin-top:12px;font-size:13px;line-height:1.4;color:#9ca3af;"></div>
