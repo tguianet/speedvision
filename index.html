@@ -115,6 +115,8 @@
         <div><span id="hipDot" class="dot"></span>Quadril: <b id="hipState">não rastreado</b></div>
         <div>Linha A: <b id="aState">aguardando</b></div>
         <div>Linha B: <b id="bState">aguardando</b></div>
+        <div>FPS solicitado: <b id="fpsRequestedOut">—</b></div>
+        <div>FPS entregue: <b id="fpsDeliveredOut">—</b></div>
         <div>FPS analisado: <b id="fpsOut">—</b></div>
         <div>Estado: <b id="runState">não armado</b></div>
       </div>
@@ -132,7 +134,7 @@ const cameraBtn=$('#cameraBtn'), stopBtn=$('#stopBtn'), armBtn=$('#armBtn'), res
 const distanceInput=$('#distance'), athleteNameInput=$('#athleteName'), facing=$('#facing');
 const modelDot=$('#modelDot'), camDot=$('#camDot'), athDot=$('#athDot'), hipDot=$('#hipDot');
 const modelState=$('#modelState'), camState=$('#camState'), athState=$('#athState'), hipState=$('#hipState');
-const aState=$('#aState'), bState=$('#bState'), runState=$('#runState'), fpsOut=$('#fpsOut'), message=$('#message');
+const aState=$('#aState'), bState=$('#bState'), runState=$('#runState'), fpsOut=$('#fpsOut'), fpsRequestedOut=$('#fpsRequestedOut'), fpsDeliveredOut=$('#fpsDeliveredOut'), message=$('#message');
 const timeOut=$('#timeOut'), kmhOut=$('#kmhOut'), msOut=$('#msOut');
 const historyBody=$('#historyBody'), exportBtn=$('#exportBtn'), clearHistoryBtn=$('#clearHistoryBtn'), athleteFilter=$('#athleteFilter');
 const HISTORY_KEY='speedvision_history_v1';
@@ -140,6 +142,7 @@ let currentFpsValue=null;
 const hudArmBtn=$('#hudArmBtn'), hudResetBtn=$('#hudResetBtn'), hudDistance=$('#hudDistance'), hudState=$('#hudState'), hudTime=$('#hudTime'), hudKmh=$('#hudKmh');
 
 let pose=null, stream=null, frameHandle=null, running=false, armed=false;
+let requestedFps=null, deliveredFps=null, deliveredWidth=null, deliveredHeight=null;
 let lineA=.20, lineB=.80, dragging=null;
 let prevHipX=null, t1=null, t2=null, lastTimestamp=-1, lastFpsT=performance.now(), frames=0;
 let smoothHipX=null, startLine=null, finishLine=null;
@@ -186,7 +189,10 @@ function storeTest({athlete,distance,direction,time,ms,kmh}){
     time,
     ms,
     kmh,
-    fps: currentFpsValue
+    fps: currentFpsValue,
+    fpsRequested: requestedFps,
+    fpsDelivered: deliveredFps,
+    resolution: (deliveredWidth&&deliveredHeight)?(deliveredWidth+'x'+deliveredHeight):null
   });
   saveHistory(items.slice(-500));
   renderHistory();
@@ -194,8 +200,8 @@ function storeTest({athlete,distance,direction,time,ms,kmh}){
 function exportHistory(){
   const items=loadHistory();
   if(!items.length){message.textContent='Não há testes para exportar.';return}
-  const rows=[['atleta','data','distancia_m','sentido','tempo_s','velocidade_ms','velocidade_kmh','fps']];
-  items.forEach(i=>rows.push([i.athlete||'Sem nome',i.iso,i.distance,i.direction,i.time,i.ms,i.kmh,i.fps??'']));
+  const rows=[['atleta','data','distancia_m','sentido','tempo_s','velocidade_ms','velocidade_kmh','fps_solicitado','fps_entregue','fps_analisado','resolucao']];
+  items.forEach(i=>rows.push([i.athlete||'Sem nome',i.iso,i.distance,i.direction,i.time,i.ms,i.kmh,i.fpsRequested??'',i.fpsDelivered??'',i.fps??'',i.resolution??'']));
   const csv=rows.map(r=>r.join(';')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
@@ -269,18 +275,57 @@ async function startCamera(){
     }
 
     const facingMode = facing.value || 'environment';
-    const attempts = [
-      {audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60}}},
-      {audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}},
-      {audio:false,video:{facingMode:{ideal:facingMode}}},
-      {audio:false,video:true}
-    ];
+    const fpsTargets = [240,120,60,30];
+    const attempts = [];
+    for (const fps of fpsTargets){
+      attempts.push({
+        fps,
+        constraints:{
+          audio:false,
+          video:{
+            facingMode:{ideal:facingMode},
+            width:{ideal:1920},
+            height:{ideal:1080},
+            frameRate:{ideal:fps}
+          }
+        }
+      });
+      attempts.push({
+        fps,
+        constraints:{
+          audio:false,
+          video:{
+            facingMode:{ideal:facingMode},
+            width:{ideal:1280},
+            height:{ideal:720},
+            frameRate:{ideal:fps}
+          }
+        }
+      });
+    }
+    attempts.push({fps:null,constraints:{audio:false,video:{facingMode:{ideal:facingMode}}}});
+    attempts.push({fps:null,constraints:{audio:false,video:true}});
 
     let lastError=null;
-    for(const constraints of attempts){
+    requestedFps=null;
+    deliveredFps=null;
+    deliveredWidth=null;
+    deliveredHeight=null;
+
+    for(const attempt of attempts){
       try{
-        stream=await navigator.mediaDevices.getUserMedia(constraints);
-        if(stream) break;
+        const candidate=await navigator.mediaDevices.getUserMedia(attempt.constraints);
+        const track=candidate.getVideoTracks()[0];
+        const s=track && track.getSettings ? track.getSettings() : {};
+        const actual=Number(s.frameRate)||null;
+
+        // Aceita o modo se abriu. Guarda o FPS que pedimos e o que a câmera entregou.
+        stream=candidate;
+        requestedFps=attempt.fps;
+        deliveredFps=actual;
+        deliveredWidth=s.width||null;
+        deliveredHeight=s.height||null;
+        break;
       }catch(err){
         lastError=err;
       }
@@ -292,11 +337,18 @@ async function startCamera(){
     await new Promise(r=>{if(video.readyState>=2)r();else video.onloadedmetadata=()=>r();});
     canvas.width=video.videoWidth;canvas.height=video.videoHeight;
     camState.textContent='aberta';setDot(camDot,true);stopBtn.disabled=false;cameraBtn.disabled=true;armBtn.disabled=!pose;running=true;
+    fpsRequestedOut.textContent=requestedFps?requestedFps+' FPS':'automático';
+    fpsDeliveredOut.textContent=deliveredFps?deliveredFps.toFixed(1)+' FPS':'não informado';
 
     const track=stream.getVideoTracks()[0];
     const settings=track && track.getSettings ? track.getSettings() : {};
-    const fps=settings.frameRate ? Math.round(settings.frameRate) : '?';
-    message.textContent=`Câmera aberta (${settings.width||'?'}×${settings.height||'?'} / ${fps} FPS). Arraste as linhas A e B para os cones.`;
+    deliveredFps=Number(settings.frameRate)||deliveredFps;
+    deliveredWidth=settings.width||deliveredWidth;
+    deliveredHeight=settings.height||deliveredHeight;
+
+    const reqTxt=requestedFps?requestedFps+' FPS':'automático';
+    const delTxt=deliveredFps?deliveredFps.toFixed(1)+' FPS':'não informado';
+    message.textContent=`Câmera aberta (${deliveredWidth||'?'}×${deliveredHeight||'?'}). Solicitado: ${reqTxt} | Entregue: ${delTxt}. Arraste as linhas A e B para os cones.`;
     scheduleFrame();
   }catch(e){
     console.error(e);
