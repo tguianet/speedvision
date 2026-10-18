@@ -92,13 +92,23 @@ function autoCourt(){
  if(near===undefined){$('msg').textContent='Laterais encontradas, mas faltam linhas transversais confiáveis. Tente outro quadro.';return false}
  const xAt=(line,y)=>(line.rho-y*line.si)/line.co;
  const result=[[xAt(left,far)/w,far/h],[xAt(right,far)/w,far/h],[xAt(right,near)/w,near/h],[xAt(left,near)/w,near/h]];
- if(result.some(p=>p.some(z=>!Number.isFinite(z)||z<-.15||z>1.15))){$('msg').textContent='Perspectiva inconsistente. Tente outro quadro.';return false}
+ // Reject dark end screens, social-media overlays and court lines outside the visible frame.
+ const area=((result[2][0]-result[3][0])+(result[1][0]-result[0][0]))*(result[2][1]-result[0][1])*.5;
+ const sideSupport=(line)=>{let hits=0,total=0;for(let y=far+4;y<near-4;y+=2){const xx=Math.round(xAt(line,y));if(xx<4||xx>=w-4)continue;total++;let found=false;for(let dx=-3;dx<=3;dx++)if(mask[y*w+xx+dx]){found=true;break}if(found)hits++}return total?hits/total:0};
+ const topWidth=result[1][0]-result[0][0],bottomWidth=result[2][0]-result[3][0];
+ const valid=area>.10&&area<.85&&topWidth>.14&&bottomWidth>.25&&bottomWidth>=topWidth*.9&&
+ result.every(p=>p[0]>.02&&p[0]<.98&&p[1]>.04&&p[1]<.97)&&
+ sideSupport(left)>.32&&sideSupport(right)>.32&&
+ far<h*.72&&near>h*.60;
+ if(!valid){$('msg').textContent='Detecção rejeitada: linhas ou perspectiva não correspondem a uma quadra visível. Pause em uma imagem da quadra e tente novamente.';return false}
+
+ if(result.some(p=>p.some(z=>!Number.isFinite(z)||z<0||z>1))){$('msg').textContent='Perspectiva inconsistente. Tente outro quadro.';return false}
  corners=result;mode='court';show=true;$('guides').textContent='Ocultar linhas';draw();
  $('msg').textContent='Quadra identificada automaticamente (experimental). Acompanhamento visual iniciado.';locked=true;previous=capture();features=previous?seed(previous):[];previousTime=v.currentTime;trackQuality='estimated';misses=0;$('lock').textContent='🔒 Quadra fixada';return true;
 }
 $('auto').onclick=()=>{autoCourt()};
 let autoStartedFor=null;
-function beginAutomatic(){if(!v.src||v.readyState<2||autoStartedFor===v.src)return;autoStartedFor=v.src;const success=autoCourt();if(!success)$('msg').textContent='Análise automática iniciada, mas a quadra não foi confirmada neste quadro. Tente outro momento do vídeo.'}
+function beginAutomatic(){if(!v.src||v.readyState<2||autoStartedFor===v.src)return;autoStartedFor=v.src;const success=autoCourt();if(!success)$('tracking').textContent='Quadra não identificada — procure um quadro com a quadra visível'}
 
 function unlock(){locked=false;previous=null;previousTime=-1;trackQuality='idle';features=[];misses=0;$('tracking').textContent='Quadra não fixada';$('lock').textContent='🔒 Fixar quadra'}
 function draw(){tracking();const w=c.width,h=c.height;x.fillStyle='#000';x.fillRect(0,0,w,h);if(v.readyState>=2){x.save();x.translate(w/2,h/2);x.rotate(turn*Math.PI/2);if(turn%2){x.drawImage(v,-h/2,-w/2,h,w)}else{x.drawImage(v,-w/2,-h/2,w,h)}x.restore()}
