@@ -33,13 +33,13 @@ function autoCourt(){
  // White paint is bright and low-chroma. Search in lower court region to reject audience and signage.
  for(let y=Math.floor(h*.30);y<h*.96;y++)for(let x=5;x<w-5;x++){
  const i=(y*w+x)*4,R=px[i],G=px[i+1],B=px[i+2],mx=Math.max(R,G,B),mn=Math.min(R,G,B);
- if(mn>130&&mx-mn<78&&R+G+B>525){mask[y*w+x]=1}
+ const bright=(R+G+B)/3;const clay=R>G*1.15&&G>B*.95;const pale=bright>145&&mx-mn<105;const white=bright>175&&mx-mn<75;if((pale||white)&&!clay){mask[y*w+x]=1}
  }
  // Preserve pixels with local continuity to suppress isolated spectators and noise.
  for(let y=Math.floor(h*.30)+2;y<h-3;y+=2)for(let x=7;x<w-7;x+=2){
  const i=y*w+x;if(!mask[i])continue;
  let n=0;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)n+=mask[(y+dy)*w+x+dx];
- if(n>=5)pts.push({x,y});
+ if(n>=3)pts.push({x,y});
  }
  if(pts.length<75){$('msg').textContent='Não consegui identificar linhas suficientes neste quadro. Avance o vídeo até a quadra ficar visível e tente novamente.';return}
  // Hough transform for straight white lines, with 1-degree angular resolution.
@@ -48,41 +48,48 @@ function autoCourt(){
  const stride=Math.max(1,Math.floor(pts.length/18000));
  for(let j=0;j<pts.length;j+=stride){const p=pts[j];for(let t=0;t<thetaCount;t+=2){const rho=Math.round(p.x*cs[t]+p.y*sn[t])+diag;votes[t*(2*diag+1)+rho]++}}
  const candidates=[];
+ const yNear=h*.87,yFar=h*.43;
  for(let t=0;t<thetaCount;t+=2)for(let rr=0;rr<2*diag+1;rr++){
- const count=votes[t*(2*diag+1)+rr];if(count<Math.max(8,pts.length/stride*.009))continue;
- const angle=t*Math.PI/180,co=cs[t],si=sn[t],rho=rr-diag;
- // Side lines: significant x displacement across the court, not horizontal.
- if(Math.abs(co)<.22||Math.abs(si)<.20)continue;
- const xb=(rho-(h*.89)*si)/co,xt=(rho-(h*.43)*si)/co;
- if(xb<0||xb>w||xt<0||xt>w)continue;
- candidates.push({count,xb,xt,co,si,rho});
+ const count=votes[t*(2*diag+1)+rr];if(count<Math.max(7,pts.length/stride*.004))continue;
+ const co=cs[t],si=sn[t],rho=rr-diag;
+ // A lateral may look nearly vertical. Reject only nearly horizontal lines.
+ if(Math.abs(co)<.35)continue;
+ const xb=(rho-yNear*si)/co,xt=(rho-yFar*si)/co;
+ if(xb< -w*.2||xb>w*1.2||xt< -w*.35||xt>w*1.35)continue;
+ // Verify that the white pixels actually continue along the candidate line.
+ let hits=0,total=0;
+ for(let y=Math.floor(h*.4);y<Math.floor(h*.93);y+=3){
+ const xx=Math.round((rho-y*si)/co);if(xx<3||xx>=w-3)continue;
+ total++;let yes=false;for(let dx=-3;dx<=3;dx++)if(mask[y*w+xx+dx]){yes=true;break}if(yes)hits++;
  }
- candidates.sort((a,b)=>b.count-a.count);
+ if(total<20||hits/total<.15)continue;
+ candidates.push({count,xb,xt,co,si,rho,support:hits/total});
+ }
+ candidates.sort((a,b)=>b.count*b.support-a.count*a.support);
  const unique=[];
- for(const l of candidates){if(unique.every(o=>Math.abs(o.xb-l.xb)>14||Math.abs(o.xt-l.xt)>14))unique.push(l);if(unique.length>=16)break}
+ for(const l of candidates){if(unique.every(o=>Math.abs(o.xb-l.xb)>10||Math.abs(o.xt-l.xt)>10))unique.push(l);if(unique.length>=30)break}
  let best=null,bscore=-Infinity;
  for(let i=0;i<unique.length;i++)for(let j=i+1;j<unique.length;j++){
  let a=unique[i],b=unique[j];if(a.xb>b.xb)[a,b]=[b,a];
  const width=b.xb-a.xb,topWidth=b.xt-a.xt;
- if(width<w*.25||width>w*.96||topWidth<w*.07)continue;
- // Both sides should converge toward the far end, with approximately consistent perspective.
- const convergence=width-topWidth;
- if(convergence<width*.05)continue;
- const score=a.count+b.count+Math.min(width,w*.6)*.3;
+ if(width<w*.20||width>w*1.2||topWidth<w*.06||topWidth>width*1.25)continue;
+ if(a.xb>w*.68||b.xb<w*.32)continue;
+ // Favor strong continuous court boundaries, not a pair of nearby service lines.
+ const score=(a.support+b.support)*110+a.count+b.count+Math.min(width,w*.85)*.28-Math.abs((a.xb+b.xb)/2-w/2)*.16;
  if(score>bscore){best=[a,b];bscore=score}
  }
- if(!best){$('msg').textContent='Linhas brancas encontradas, mas não consegui confirmar as duas laterais da quadra. Tente outro quadro.';return}
+ if(!best){$('msg').textContent='Não consegui identificar as duas laterais com segurança. Pause em um quadro que mostre mais da quadra.';return}
  const [left,right]=best;
  // Detect near and far horizontal white court lines by row support between side lines.
- const rowScore=y=>{const lx=(left.rho-y*left.si)/left.co,rx=(right.rho-y*right.si)/right.co;const lo=Math.max(0,Math.ceil(lx+5)),hi=Math.min(w-1,Math.floor(rx-5));if(hi-lo<20)return 0;let n=0;for(let xx=lo;xx<=hi;xx+=2){let ok=0;for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<h&&mask[(y+dy)*w+xx])ok=1;n+=ok}return n/Math.max(1,(hi-lo)/2)};
+ const rowScore=y=>{const lx=(left.rho-y*left.si)/left.co,rx=(right.rho-y*right.si)/right.co;const lo=Math.max(0,Math.ceil(lx+3)),hi=Math.min(w-1,Math.floor(rx-3));if(hi-lo<20)return 0;let n=0;for(let xx=lo;xx<=hi;xx+=2){let ok=0;for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<h&&mask[(y+dy)*w+xx])ok=1;n+=ok}return n/Math.max(1,(hi-lo)/2)};
  const ranked=[];for(let y=Math.floor(h*.37);y<Math.floor(h*.94);y+=2)ranked.push({y,score:rowScore(y)});
  ranked.sort((a,b)=>b.score-a.score);
- const strong=ranked.filter(a=>a.score>.22);
+ const strong=ranked.filter(a=>a.score>.16);
  if(strong.length<2){$('msg').textContent='Laterais candidatas encontradas, mas não consegui confirmar linhas de fundo. Tente outro quadro.';return}
  const ys=strong.map(p=>p.y).sort((a,b)=>a-b);
  const far=ys.find(y=>ys.some(z=>z-y>h*.27));
  const near=far===undefined?undefined:[...ys].reverse().find(y=>y-far>h*.27);
- if(near===undefined){$('msg').textContent='Não consegui encontrar duas linhas transversais confiáveis. Tente outro quadro.';return}
+ if(near===undefined){$('msg').textContent='Laterais encontradas, mas faltam linhas transversais confiáveis. Tente outro quadro.';return}
  const xAt=(line,y)=>(line.rho-y*line.si)/line.co;
  const result=[[xAt(left,far)/w,far/h],[xAt(right,far)/w,far/h],[xAt(right,near)/w,near/h],[xAt(left,near)/w,near/h]];
  if(result.some(p=>p.some(z=>!Number.isFinite(z)||z<-.15||z>1.15))){$('msg').textContent='Perspectiva inconsistente. Tente outro quadro.';return}
