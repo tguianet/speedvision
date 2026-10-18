@@ -1,7 +1,7 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SpeedVision Tennis · Teste</title><style>
 *{box-sizing:border-box}body{margin:0;background:#08111b;color:#f2f8fc;font:16px system-ui,Arial}main{max-width:850px;margin:auto;padding:14px}header{padding:16px;background:#12263a}h1{font-size:23px;margin:0}h2{font-size:19px;margin:8px 0}p{line-height:1.4;color:#bdd0df}.card{background:#122335;border:1px solid #30465a;border-radius:14px;padding:14px;margin:12px 0}button{background:#26c875;border:0;border-radius:10px;color:#07180f;font-weight:750;font-size:15px;padding:12px;min-height:45px}button.alt{background:#324a60;color:white}button.sel{outline:3px solid #ffe26b}button:disabled{opacity:.4}.row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;align-items:center}input[type=file]{max-width:100%;padding:10px;border:1px dashed #67809b;border-radius:10px}#screen{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#000;touch-action:none;border-radius:8px}#video{display:none}#msg{font-weight:650;color:#fce58b}small{color:#a9c0d3}.info{display:flex;gap:14px;flex-wrap:wrap}.info span{background:#1d354a;border-radius:8px;padding:9px}.tip{color:#a9c0d3;font-size:14px}</style></head><body><header><h1>🎾 SpeedVision Tennis</h1><small>Teste de quadra e trajetória da bola</small></header><main>
 <div class="card"><h2>1. Escolha o vídeo</h2><input id="file" type="file" accept="video/*"><div class="row"><button id="rotate" class="alt">↻ Girar vídeo 90°</button><button id="play">▶ Reproduzir / Pausar</button></div><canvas id="screen" width="960" height="540"></canvas><video id="video" playsinline preload="metadata"></video><p id="msg">Escolha um vídeo para começar.</p><div class="info"><span id="clock">0,00 s</span><span id="counter">0 marcações</span></div></div>
-<div class="card"><h2>2. Ajuste a quadra</h2><p>Toque em <b>Quadra</b> e arraste as quatro bolinhas amarelas para os cantos. A guia não aparece no arquivo de vídeo.</p><div class="row"><button id="court" class="sel">▱ Quadra</button><button id="ball" class="alt">● Bolinha</button><button id="guides" class="alt">Ocultar linhas</button><button id="lock">🔒 Fixar quadra</button><button id="recal" class="alt">Recalibrar</button><small id="tracking">Quadra não fixada</small></div></div>
+<div class="card"><h2>2. Ajuste a quadra</h2><p>Primeiro tente detectar as linhas brancas automaticamente. Se a detecção falhar, ajuste os quatro pontos manualmente. A guia não altera o vídeo.</p><div class="row"><button id="auto">✨ Detectar quadra automaticamente</button><button id="court" class="sel">▱ Quadra</button><button id="ball" class="alt">● Bolinha</button><button id="guides" class="alt">Ocultar linhas</button><button id="lock">🔒 Fixar quadra</button><button id="recal" class="alt">Recalibrar</button><small id="tracking">Quadra não fixada</small></div></div>
 <div class="card"><h2>3. Marque a bolinha e veja o rastro</h2><p>Pause o vídeo, toque na bolinha, avance um quadro e toque na nova posição. A marcação aparece na hora, e o rastro liga os pontos conforme o tempo do vídeo.</p><div class="row"><button id="prev" class="alt">◀ Quadro</button><button id="next" class="alt">Quadro ▶</button><button id="undo" class="alt">Desfazer ponto</button><button id="clear" class="alt">Limpar rastro</button></div><p class="tip">Este é um teste de marcação manual. A detecção automática por IA ainda não está disponível.</p></div>
 </main><script>
 const $=id=>document.getElementById(id),v=$('video'),c=$('screen'),x=c.getContext('2d');let mode='court',turn=0,show=true,drag=-1,points=[],fps=30,objectURL=null;let corners=[[.17,.14],[.83,.14],[.93,.9],[.07,.9]],locked=false,previous=null,previousTime=-1,trackQuality='idle',misses=0;const sample=document.createElement('canvas');sample.width=160;sample.height=90;const sx=sample.getContext('2d',{willReadFrequently:true});
@@ -23,6 +23,73 @@ function tracking(){if(!locked||v.readyState<2)return;const t=v.currentTime;if(t
 if(trackQuality==='tracked'||!previous){previous=now;previousTime=t;features=seed(now)}else if(misses>=4){trackQuality='lost'}
 $('tracking').textContent=trackQuality==='tracked'?'⚪ Quadra acompanhada por pontos visuais':trackQuality==='estimated'?'🟡 Sem confirmação; referência preservada':'🔴 Rastreamento perdido; recalibre';
 }
+// Experimental clay-court white-line detector. Works on the current video frame.
+function autoCourt(){
+ if(v.readyState<2){$('msg').textContent='Carregue um vídeo e pause em um quadro com a quadra visível.';return}
+ v.pause();unlock();
+ const w=320,h=Math.round(w/aspect()),cv=document.createElement('canvas');cv.width=w;cv.height=h;const q=cv.getContext('2d',{willReadFrequently:true});
+ q.save();q.translate(w/2,h/2);q.rotate(turn*Math.PI/2);if(turn%2)q.drawImage(v,-h/2,-w/2,h,w);else q.drawImage(v,-w/2,-h/2,w,h);q.restore();
+ const px=q.getImageData(0,0,w,h).data,mask=new Uint8Array(w*h),pts=[];
+ // White paint is bright and low-chroma. Search in lower court region to reject audience and signage.
+ for(let y=Math.floor(h*.30);y<h*.96;y++)for(let x=5;x<w-5;x++){
+ const i=(y*w+x)*4,R=px[i],G=px[i+1],B=px[i+2],mx=Math.max(R,G,B),mn=Math.min(R,G,B);
+ if(mn>130&&mx-mn<78&&R+G+B>525){mask[y*w+x]=1}
+ }
+ // Preserve pixels with local continuity to suppress isolated spectators and noise.
+ for(let y=Math.floor(h*.30)+2;y<h-3;y+=2)for(let x=7;x<w-7;x+=2){
+ const i=y*w+x;if(!mask[i])continue;
+ let n=0;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)n+=mask[(y+dy)*w+x+dx];
+ if(n>=5)pts.push({x,y});
+ }
+ if(pts.length<75){$('msg').textContent='Não consegui identificar linhas suficientes neste quadro. Avance o vídeo até a quadra ficar visível e tente novamente.';return}
+ // Hough transform for straight white lines, with 1-degree angular resolution.
+ const thetaCount=180,diag=Math.ceil(Math.hypot(w,h)),votes=new Uint16Array(thetaCount*(2*diag+1)),cs=[],sn=[];
+ for(let t=0;t<thetaCount;t++){cs[t]=Math.cos(t*Math.PI/180);sn[t]=Math.sin(t*Math.PI/180)}
+ const stride=Math.max(1,Math.floor(pts.length/18000));
+ for(let j=0;j<pts.length;j+=stride){const p=pts[j];for(let t=0;t<thetaCount;t+=2){const rho=Math.round(p.x*cs[t]+p.y*sn[t])+diag;votes[t*(2*diag+1)+rho]++}}
+ const candidates=[];
+ for(let t=0;t<thetaCount;t+=2)for(let rr=0;rr<2*diag+1;rr++){
+ const count=votes[t*(2*diag+1)+rr];if(count<Math.max(8,pts.length/stride*.009))continue;
+ const angle=t*Math.PI/180,co=cs[t],si=sn[t],rho=rr-diag;
+ // Side lines: significant x displacement across the court, not horizontal.
+ if(Math.abs(co)<.22||Math.abs(si)<.20)continue;
+ const xb=(rho-(h*.89)*si)/co,xt=(rho-(h*.43)*si)/co;
+ if(xb<0||xb>w||xt<0||xt>w)continue;
+ candidates.push({count,xb,xt,co,si,rho});
+ }
+ candidates.sort((a,b)=>b.count-a.count);
+ const unique=[];
+ for(const l of candidates){if(unique.every(o=>Math.abs(o.xb-l.xb)>14||Math.abs(o.xt-l.xt)>14))unique.push(l);if(unique.length>=16)break}
+ let best=null,bscore=-Infinity;
+ for(let i=0;i<unique.length;i++)for(let j=i+1;j<unique.length;j++){
+ let a=unique[i],b=unique[j];if(a.xb>b.xb)[a,b]=[b,a];
+ const width=b.xb-a.xb,topWidth=b.xt-a.xt;
+ if(width<w*.25||width>w*.96||topWidth<w*.07)continue;
+ // Both sides should converge toward the far end, with approximately consistent perspective.
+ const convergence=width-topWidth;
+ if(convergence<width*.05)continue;
+ const score=a.count+b.count+Math.min(width,w*.6)*.3;
+ if(score>bscore){best=[a,b];bscore=score}
+ }
+ if(!best){$('msg').textContent='Linhas brancas encontradas, mas não consegui confirmar as duas laterais da quadra. Tente outro quadro.';return}
+ const [left,right]=best;
+ // Detect near and far horizontal white court lines by row support between side lines.
+ const rowScore=y=>{const lx=(left.rho-y*left.si)/left.co,rx=(right.rho-y*right.si)/right.co;const lo=Math.max(0,Math.ceil(lx+5)),hi=Math.min(w-1,Math.floor(rx-5));if(hi-lo<20)return 0;let n=0;for(let xx=lo;xx<=hi;xx+=2){let ok=0;for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<h&&mask[(y+dy)*w+xx])ok=1;n+=ok}return n/Math.max(1,(hi-lo)/2)};
+ const ranked=[];for(let y=Math.floor(h*.37);y<Math.floor(h*.94);y+=2)ranked.push({y,score:rowScore(y)});
+ ranked.sort((a,b)=>b.score-a.score);
+ const strong=ranked.filter(a=>a.score>.22);
+ if(strong.length<2){$('msg').textContent='Laterais candidatas encontradas, mas não consegui confirmar linhas de fundo. Tente outro quadro.';return}
+ const ys=strong.map(p=>p.y).sort((a,b)=>a-b);
+ const far=ys.find(y=>ys.some(z=>z-y>h*.27));
+ const near=far===undefined?undefined:[...ys].reverse().find(y=>y-far>h*.27);
+ if(near===undefined){$('msg').textContent='Não consegui encontrar duas linhas transversais confiáveis. Tente outro quadro.';return}
+ const xAt=(line,y)=>(line.rho-y*line.si)/line.co;
+ const result=[[xAt(left,far)/w,far/h],[xAt(right,far)/w,far/h],[xAt(right,near)/w,near/h],[xAt(left,near)/w,near/h]];
+ if(result.some(p=>p.some(z=>!Number.isFinite(z)||z<-.15||z>1.15))){$('msg').textContent='Perspectiva inconsistente. Tente outro quadro.';return}
+ corners=result;mode='court';show=true;$('guides').textContent='Ocultar linhas';draw();
+ $('msg').textContent='Quadra sugerida automaticamente (experimental). Confira os quatro cantos; se estiverem corretos, toque em Fixar quadra.';
+}
+$('auto').onclick=autoCourt;
 function unlock(){locked=false;previous=null;previousTime=-1;trackQuality='idle';features=[];misses=0;$('tracking').textContent='Quadra não fixada';$('lock').textContent='🔒 Fixar quadra'}
 function draw(){tracking();const w=c.width,h=c.height;x.fillStyle='#000';x.fillRect(0,0,w,h);if(v.readyState>=2){x.save();x.translate(w/2,h/2);x.rotate(turn*Math.PI/2);if(turn%2){x.drawImage(v,-h/2,-w/2,h,w)}else{x.drawImage(v,-w/2,-h/2,w,h)}x.restore()}
 if(show){x.strokeStyle='#3aff94';x.lineWidth=Math.max(3,w/280);x.beginPath();corners.forEach((p,i)=>i?x.lineTo(p[0]*w,p[1]*h):x.moveTo(p[0]*w,p[1]*h));x.closePath();x.stroke();corners.forEach((p,i)=>{x.beginPath();x.arc(p[0]*w,p[1]*h,Math.max(12,w/70),0,Math.PI*2);x.fillStyle=locked?(trackQuality==='tracked'?'#ffffff':trackQuality==='lost'?'#ff5d62':'#ffdb59'):'#ffe156';x.fill();x.fillStyle='#15202a';x.font='bold 23px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(i+1,p[0]*w,p[1]*h)})}
